@@ -338,7 +338,7 @@ function vCards() {
     <input type="search" id="search" placeholder="この分類の中を検索" value="${esc(S.query)}">
     <div class="row" style="margin:10px 0">
       <button class="primary small" data-act="newCard">＋ カード</button>
-      <button class="small" data-act="newCat">＋ 分類</button>
+      <button class="small" data-act="newCat">${S.catId ? `＋「${esc(path[path.length - 1].name)}」の中に分類` : '＋ 大分類'}</button>
       <button class="small" data-act="reviewCat" ${dueHere ? '' : 'disabled'}>ここを復習 (${dueHere})</button>
       ${S.catId ? `<button class="small" data-act="renameCat">名前変更</button><button class="small danger" data-act="deleteCat">削除</button>` : ''}
     </div>`;
@@ -358,7 +358,9 @@ function vCards() {
         <span class="chip lv${lv.n}">${lv.label}</span><span class="sub">${fmtDue(c.srs.due)}</span></li>`;
     }).join('') + `</ul></div>`;
   } else if (!subs.length || q) {
-    h += `<div class="empty">${q ? '見つかりません' : 'ここにはまだ何もありません。<br>例：英語 › TOEIC › 英単語、趣味 › ダーツ'}</div>`;
+    h += `<div class="empty">${q ? '見つかりません' : (S.catId
+      ? `ここにはまだ何もありません。<br>上の「＋「${esc(path[path.length - 1].name)}」の中に分類」で中分類を作れます<br>（例：英単語、英熟語、英文法）`
+      : 'まず「＋ 大分類」で英語・数学・趣味などを作り、<br>その分類を開いて中に英単語・英熟語などを作ります')}</div>`;
   }
   return h;
 }
@@ -649,9 +651,25 @@ const actions = {
   openCard(d) { openEdit(items.get(d.id)); },
   newCard() { openEdit(newCard(S.catId)); },
   newCat() {
-    const name = prompt('分類の名前（例：英語、TOEIC、英単語、ダーツ）');
-    if (!name || !name.trim()) return;
-    save({ id: uid(), kind: 'category', name: name.trim(), parentId: S.catId, created: now() });
+    const here = catPath(S.catId).map(c => c.name).join(' › ');
+    const msg = here
+      ? `「${here}」の中に作る分類の名前\n・複数は「,」か「、」で区切る（例：英単語、英熟語、英文法）\n・「/」でさらに下まで（例：TOEIC/英単語）`
+      : `大分類の名前（例：英語、数学、趣味）\n・複数は「,」か「、」で区切る\n・「/」で中分類まで一度に（例：英語/英熟語）`;
+    const text = prompt(msg);
+    if (!text || !text.trim()) return;
+    const made = [];
+    for (const part of text.split(/[,、，]/)) {
+      const names = part.split(/\s*[\/／›>]\s*/).map(s => s.trim()).filter(Boolean);
+      if (!names.length) continue;
+      let pid = S.catId;
+      for (const n of names) {
+        let c = childCats(pid).find(x => x.name === n);
+        if (!c) { c = { id: uid(), kind: 'category', name: n, parentId: pid, created: now() }; save(c); }
+        pid = c.id;
+      }
+      made.push(names.join(' › '));
+    }
+    toast(made.length ? `作りました：${made.join('、')}` : '名前が空でした');
     render();
   },
   renameCat() {

@@ -85,10 +85,19 @@ function newCard(catId) {
   return {
     id: uid(), kind: 'card', categoryId: catId || null,
     front: '', meaning: '', concept: '', image: '', example: '', mission: '',
+    hint: '',   // 同じ表で意味が複数あるとき、どの意味かを見分けるヒント（例：名詞・お金の場面）
+    group: null, // 同じ表の別の意味どうしを結ぶ ID
     problems: [], // [{q, a, exp}]
     srs: { stage: 0, due: now(), lapses: 0, reviews: 0, last: 0 },
     useOk: 0, missionDone: 0, missionLast: 0, needsAI: false, created: now(),
   };
+}
+// 同じ表の別の意味（意味ごとに別カード・別スケジュール）
+function siblings(c) {
+  if (!c.group) return [c];
+  const list = cards().filter(x => x.group === c.group);
+  if (!list.some(x => x.id === c.id)) list.push(c);
+  return list.sort((a, b) => a.created - b.created);
 }
 // 学習の3段階：覚える → 使える → 応用
 function level(c) {
@@ -231,7 +240,15 @@ function startReview(catId) {
   const pool = (catId ? cardsIn(catId) : cards()).filter(isDue).sort((a, b) => a.srs.due - b.srs.due).slice(0, SESSION_MAX);
   if (!pool.length) { toast('今は復習するカードがありません'); return; }
   const name = catId ? catPath(catId).map(c => c.name).join(' › ') : 'すべて';
-  S.session = { queue: pool.map(c => c.id), idx: 0, revealed: false, scopeName: name, done: 0 };
+  // 同じ言葉の別の意味が続けて出ないようにばらす（続くと前の答えにつられるため）
+  const spread = [], rest = pool.slice();
+  while (rest.length) {
+    const prev = spread[spread.length - 1];
+    let i = rest.findIndex(c => !prev || !c.group || c.group !== prev.group);
+    if (i < 0) i = 0;
+    spread.push(rest.splice(i, 1)[0]);
+  }
+  S.session = { queue: spread.map(c => c.id), idx: 0, revealed: false, scopeName: name, done: 0 };
   S.session.q = makeQuestion(items.get(S.session.queue[0]));
   go('review', 'review');
 }
@@ -255,7 +272,10 @@ function qHtml(c, q, revealed, isTest) {
   const path = catPath(c.categoryId).map(x => x.name).join(' › ');
   let h = `<div class="row between"><span class="q-kind">${{ recall: '思い出す（表→裏）', reverse: 'これは何？（裏→表）', use: '使ってみる' }[q.type]}</span><span class="sub">${esc(path)}</span></div>`;
   if (q.type === 'recall') {
-    h += `<div class="q-front">${esc(c.front)}</div><div class="sub" style="text-align:center">意味・概念・イメージを頭に浮かべてから答えを見る</div>`;
+    const sib = siblings(c), multi = sib.length > 1;
+    h += `<div class="q-front" style="margin-bottom:${multi ? 6 : 18}px">${esc(c.front)}</div>`;
+    if (multi) h += `<div style="text-align:center"><span class="chip lv2">意味 ${sib.findIndex(x => x.id === c.id) + 1}/${sib.length}</span>${c.hint ? ` <b>${esc(c.hint)}</b>` : ''}</div>`;
+    h += `<div class="sub" style="text-align:center;margin-top:12px">${multi ? 'この意味を' : ''}意味・概念・イメージを頭に浮かべてから答えを見る</div>`;
   } else if (q.type === 'reverse') {
     if (c.image) h += `<img class="q-img" src="${c.image}" alt="">`;
     if (c.concept) h += `<div class="q-text" style="text-align:center">${esc(c.concept)}</div>`;
@@ -349,13 +369,24 @@ function vCards() {
     }).join('') + `</ul></div>`;
   }
   if (list.length) {
-    h += `<div class="box" style="padding:4px 12px"><ul class="list">` + list.map(c => {
-      const lv = level(c);
+    // 同じ表の別の意味は1行にまとめる
+    const seen = new Set(), rows = [];
+    for (const c of list) {
+      if (!c.group) { rows.push([c]); continue; }
+      if (seen.has(c.group)) continue;
+      seen.add(c.group);
+      rows.push(list.filter(x => x.group === c.group).sort((a, b) => a.created - b.created));
+    }
+    h += `<div class="box" style="padding:4px 12px"><ul class="list">` + rows.map(g => {
+      const c = g[0], multi = g.length > 1;
+      const lvMin = Math.min(...g.map(x => level(x).n)), lvLabel = ['覚える', '使える', '応用'][lvMin - 1];
+      const img = g.find(x => x.image), due = Math.min(...g.map(x => x.srs.due));
+      const sub = multi ? g.map(x => x.hint || x.meaning || x.concept || '').filter(Boolean).join(' ／ ') : (c.meaning || c.concept || '');
       return `<li data-act="openCard" data-id="${c.id}">
-        ${c.image ? `<img class="thumb" src="${c.image}" alt="">` : '<span class="folder">🃏</span>'}
-        <span class="grow"><b>${esc(c.front)}</b><br><span class="sub">${esc((c.meaning || c.concept || '').slice(0, 40))}</span></span>
-        ${c.needsAI ? '<span class="chip ai">作成待ち</span>' : ''}
-        <span class="chip lv${lv.n}">${lv.label}</span><span class="sub">${fmtDue(c.srs.due)}</span></li>`;
+        ${img ? `<img class="thumb" src="${img.image}" alt="">` : '<span class="folder">🃏</span>'}
+        <span class="grow"><b>${esc(c.front)}</b>${multi ? ` <span class="chip lv2">意味${g.length}つ</span>` : ''}<br><span class="sub">${esc(sub.slice(0, 40))}</span></span>
+        ${g.some(x => x.needsAI) ? '<span class="chip ai">作成待ち</span>' : ''}
+        <span class="chip lv${lvMin}">${lvLabel}</span><span class="sub">${fmtDue(due)}</span></li>`;
     }).join('') + `</ul></div>`;
   } else if (!subs.length || q) {
     h += `<div class="empty">${q ? '見つかりません' : (S.catId
@@ -381,6 +412,12 @@ function vEdit() {
     <div class="box">
       <label class="f">分類</label><select data-f="categoryId">${catOptions(d.categoryId)}</select>
       <label class="f">表（覚えたいこと）</label><input type="text" data-f="front" value="${esc(d.front)}" placeholder="例：procrastinate / 二次方程式の解の公式 / ダーツのグリップ">
+      ${(() => {
+        const sib = siblings(d), multi = sib.length > 1;
+        return `<label class="f">意味の見分けヒント${multi ? '（必須に近い）' : '（意味が複数あるときだけ）'}</label>
+      <input type="text" data-f="hint" value="${esc(d.hint)}" placeholder="例：名詞・お金の場面 ／ 名詞・川の場面 ／ 動詞">
+      <div class="hint">同じ表で意味が複数あるとき、復習の問題文に出ます（答えそのものは書かない）。</div>`;
+      })()}
       <label class="f">裏：写真・図</label>
       ${d.image ? `<img class="q-img" src="${d.image}" alt=""><button class="small danger" data-act="removeImage">写真を外す</button>` : ''}
       <div id="dropzone" class="dropzone">
@@ -411,11 +448,31 @@ function vEdit() {
       <textarea data-f="mission" placeholder="例：今日の日記かSlackで1回 procrastinate を使う／次の練習でグリップを3本ずつ確認">${esc(d.mission)}</textarea>
       <div class="hint">実生活で使う場面。ホームに日替わりで出ます。</div>
     </div>
+    <div class="box">
+      <h2>同じ表の別の意味</h2>
+      ${(() => {
+        const sib = siblings(d);
+        const others = sib.filter(x => x.id !== d.id);
+        return `<div class="sub" style="margin-bottom:6px">${sib.length > 1 ? `この言葉には意味が ${sib.length} つ登録されています。意味ごとに写真・復習の間隔・問題を別々に持ちます。` : '意味が複数ある言葉（bank＝銀行／土手 など）は、意味ごとに別カードにすると、写真も復習も意味ごとに覚えられます。'}</div>
+      ${others.length ? `<ul class="list">${others.map(x => `<li data-act="openSibling" data-id="${x.id}">${x.image ? `<img class="thumb" src="${x.image}" alt="">` : '<span class="folder">🃏</span>'}<span class="grow">${esc(x.hint || x.meaning || x.concept || '（未入力）')}</span><span class="sub">${fmtDue(x.srs.due)}</span></li>`).join('')}</ul>` : ''}
+      <button class="small" style="margin-top:8px" data-act="addSense">＋ 別の意味を追加</button>`;
+      })()}
+    </div>
     <div class="row">
       <button class="primary grow" data-act="saveCard">保存</button>
       ${exists ? `<button class="danger" data-act="deleteCard">削除</button><button data-act="resetCard">覚え直す</button>` : ''}
     </div>
     ${exists ? `<div class="hint" style="margin-top:8px">段階 ${d.srs.stage}/8 ・ 次の復習 ${fmtDue(d.srs.due)} ・ 間違い ${d.srs.lapses} 回 ・ 使える問題 正解 ${d.useOk} 回 ・ ミッション ${d.missionDone} 回</div>` : ''}`;
+}
+function commitDraft() {
+  const d = S.draft;
+  if (!d.front.trim()) { toast('表を入れてください'); return false; }
+  d.front = d.front.trim();
+  d.problems = d.problems.filter(p => p.q.trim());
+  save(d); S.catId = d.categoryId || null;
+  // 同じ表の別の意味は、表の文字をそろえておく（表を直したら全部に反映）
+  if (d.group) for (const x of siblings(d)) if (x.id !== d.id && x.front !== d.front) { x.front = d.front; save(x); }
+  return true;
 }
 function resizeImage(file, max = 720) {
   return new Promise((res, rej) => {
@@ -463,7 +520,8 @@ function vSettings() {
 }
 function requestText() {
   const ai = cards().filter(c => c.needsAI).map(c => ({
-    id: c.id, path: catPath(c.categoryId).map(x => x.name), front: c.front,
+    id: c.id, path: catPath(c.categoryId).map(x => x.name), front: c.front, hint: c.hint || undefined,
+    otherSenses: siblings(c).length > 1 ? siblings(c).filter(x => x.id !== c.id).map(x => x.hint || x.meaning || '') : undefined,
     meaning: c.meaning || undefined, concept: c.concept || undefined, example: c.example || undefined,
     problems: c.problems.length ? c.problems : undefined, mission: c.mission || undefined,
   }));
@@ -477,6 +535,9 @@ function requestText() {
   - 趣味（歌・ダーツ・筋トレ等）：実際の場面での判断・手順を問う
   - 実生活でよく使う場面を優先
 - mission：実生活で実際に使う小さな行動を1つ
+- hint がある札は、同じ表の別の意味（otherSenses）と取り違えないよう、その意味に限った問題にする
+- 新しい札を作るとき、意味が複数ある言葉は senses にまとめる（意味ごとに別カードになる）：
+  {"path":[…],"front":"bank","senses":[{"hint":"名詞・お金の場面","meaning":"銀行","concept":"…","example":"…","problems":[…]},{"hint":"名詞・川の場面","meaning":"土手","…":"…"}]}
 返答は JSON 配列だけ（id はそのまま返す）：
 [{"id":"…","meaning":"…","concept":"…","example":"…","mission":"…","problems":[{"q":"…","a":"…","exp":"…"}]}]
 
@@ -493,12 +554,25 @@ function importCards(text) {
     if (!x || typeof x !== 'object') continue;
     let c = x.id && items.get(x.id);
     if (c && c.deleted) c = null;
+    // 意味が複数ある言葉：senses の1つ1つを別カードにして、同じ group で結ぶ
+    if (!c && x.front && Array.isArray(x.senses) && x.senses.length) {
+      const cat = Array.isArray(x.path) ? ensurePath(x.path) : (typeof x.path === 'string' ? ensurePath(x.path.split(/\s*[>›\/]\s*/)) : S.catId);
+      const gid = x.senses.length > 1 ? uid() : null;
+      for (const sx of x.senses) {
+        const n = newCard(cat);
+        n.front = String(x.front).trim(); n.group = gid;
+        for (const k of ['hint', 'meaning', 'concept', 'example', 'mission', 'image']) if (typeof sx[k] === 'string' && sx[k].trim()) n[k] = sx[k].trim();
+        if (Array.isArray(sx.problems)) n.problems = sx.problems.filter(p => p && p.q).map(p => ({ q: String(p.q), a: String(p.a ?? ''), exp: String(p.exp ?? '') }));
+        save(n); added++;
+      }
+      continue;
+    }
     if (!c) {
       if (!x.front) continue;
       c = newCard(Array.isArray(x.path) ? ensurePath(x.path) : (typeof x.path === 'string' ? ensurePath(x.path.split(/\s*[>›\/]\s*/)) : S.catId));
       added++;
     } else updated++;
-    for (const k of ['front', 'meaning', 'concept', 'example', 'mission', 'image']) if (typeof x[k] === 'string' && x[k].trim()) c[k] = x[k].trim();
+    for (const k of ['front', 'hint', 'meaning', 'concept', 'example', 'mission', 'image']) if (typeof x[k] === 'string' && x[k].trim()) c[k] = x[k].trim();
     if (Array.isArray(x.problems) && x.problems.length) {
       c.problems = x.problems.filter(p => p && p.q).map(p => ({ q: String(p.q), a: String(p.a ?? ''), exp: String(p.exp ?? '') }));
     }
@@ -533,6 +607,12 @@ const SAMPLE = [
     problems: [{ q: '誤りを直せ：I procrastinated to do my homework until midnight.', a: 'I procrastinated on my homework until midnight. / I put off doing my homework until midnight.', exp: 'procrastinate は自動詞。「〜を先延ばしにする」は procrastinate on ~ か put off ~ing。to不定詞はとらない。' },
       { q: '上司に「報告書を後回しにしてすみません」と英語で一言。', a: "Sorry, I've been procrastinating on the report.", exp: '現在完了進行形で「ずっと先延ばしにしてきた」。' }],
     mission: '今日の予定を書くとき、後回しにしたいことを1つ英語で書く（I tend to procrastinate on ~）' },
+  { path: ['英語', 'TOEIC', '英単語'], front: 'run', senses: [
+    { hint: '動詞・人が主語', meaning: '走る', concept: '足が地面を蹴って前へ進むイメージ', example: 'I run in the park every morning.',
+      problems: [{ q: '誤りを直せ：I runned 5 km yesterday.', a: 'I ran 5 km yesterday.', exp: 'run は不規則変化：run – ran – run。' }], mission: '今日歩く道を1回だけ I run to ~ と英語で言ってみる' },
+    { hint: '動詞・会社や店が目的語', meaning: '（会社・店などを）経営する', concept: '機械を動かし続ける＝事業を回し続けるイメージ', example: 'She runs a small cafe near the station.',
+      problems: [{ q: '「彼は父の会社を経営している」を run を使って英語に。', a: 'He runs his father\'s company.', exp: '目的語に会社・店・イベントをとると「運営する」。' }] },
+  ] },
   { path: ['英語', '英文法'], front: '提案の suggest', meaning: 'suggest + 人 + to do はとれない。suggest (that) S (should) 原形 / suggest ~ing', concept: 'suggest は「アイデアを机に置く」。人を直接動かす動詞ではない',
     problems: [{ q: '誤りを直せ：He suggested me to take a break.', a: 'He suggested (that) I (should) take a break. / He suggested taking a break.', exp: 'suggest は目的語に人 + to不定詞をとれない。that節（原形）か動名詞。' }],
     mission: '友達か同僚に何かを提案するメッセージを、頭の中で I suggest (that) we ~ に置き換えてみる' },
@@ -552,7 +632,7 @@ const SAMPLE = [
 ];
 function loadSample() {
   importCards(JSON.stringify(SAMPLE));
-  toast('サンプルを6枚入れました');
+  toast('サンプルを入れました');
   render();
 }
 
@@ -703,14 +783,26 @@ const actions = {
     } catch (e) { toast('貼れませんでした：' + (e.message || e.name)); }
   },
   saveCard() {
-    const d = S.draft;
-    if (!d.front.trim()) { toast('表を入れてください'); return; }
-    d.front = d.front.trim();
-    d.problems = d.problems.filter(p => p.q.trim());
-    const isNew = !items.has(d.id);
-    save(d); S.catId = d.categoryId || null; S.draft = null;
+    const isNew = !items.has(S.draft.id);
+    if (!commitDraft()) return;
+    S.draft = null;
     toast(isNew ? 'カードを作りました' : '保存しました');
     go('cards', 'cards');
+  },
+  // いま編集中のカードを保存して、同じ表の新しい意味を作る
+  addSense() {
+    const d = S.draft;
+    if (!d.front.trim()) { toast('先に表を入れてください'); return; }
+    if (!d.group) d.group = uid();
+    if (!commitDraft()) return;
+    const n = newCard(d.categoryId);
+    n.front = d.front; n.group = d.group;
+    openEdit(n);
+    toast('新しい意味を作ります。ヒント・写真・意味を入れて保存');
+  },
+  openSibling(d) {
+    if (S.draft.front.trim() && !commitDraft()) return;
+    openEdit(items.get(d.id));
   },
   deleteCard() {
     if (!confirm('このカードを削除しますか？')) return;

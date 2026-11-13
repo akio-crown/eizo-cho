@@ -383,9 +383,14 @@ function vEdit() {
       <label class="f">表（覚えたいこと）</label><input type="text" data-f="front" value="${esc(d.front)}" placeholder="例：procrastinate / 二次方程式の解の公式 / ダーツのグリップ">
       <label class="f">裏：写真・図</label>
       ${d.image ? `<img class="q-img" src="${d.image}" alt=""><button class="small danger" data-act="removeImage">写真を外す</button>` : ''}
-      <div class="row"><button class="small" data-act="pasteImage">📋 コピーした画像を貼る</button></div>
-      <input type="file" accept="image/*" id="imgInput" style="margin-top:8px">
-      <div class="hint">写真・スクショ・手書きの図。映像で覚えるための主役です。スクショは「コピー」してから上のボタン（PC は Ctrl/⌘+V でも貼れます）。</div>
+      <div id="dropzone" class="dropzone">
+        <div class="dz-text"><span class="dz-pc">ここに画像をドラッグ＆ドロップ<br><small>Mac のスクショ右下のサムネをつかんで、そのままここへ</small></span><span class="dz-sp">写真・スクショを追加</span></div>
+        <div class="row" style="justify-content:center;margin-top:8px">
+          <label class="btn primary">📷 写真から選ぶ<input type="file" accept="image/*" id="imgInput" hidden></label>
+          <button data-act="pasteImage">📋 コピーした画像を貼る</button>
+        </div>
+      </div>
+      <div class="hint">写真・スクショ・手書きの図。映像で覚えるための主役です。PC は Ctrl/⌘+V でも貼れます。</div>
       <label class="f">裏：概念（ひとことで・イメージ）</label><textarea data-f="concept" placeholder="例：やるべきことを「あとで」の箱に押し込むイメージ">${esc(d.concept)}</textarea>
       <label class="f">裏：日本語の意味・解説</label><textarea data-f="meaning" placeholder="例：（やるべきことを）先延ばしにする">${esc(d.meaning)}</textarea>
       <label class="f">模範解答・例文</label><textarea data-f="example" placeholder="例：Stop procrastinating and start your report.">${esc(d.example)}</textarea>
@@ -754,6 +759,23 @@ document.addEventListener('input', e => {
 async function setImage(blob) {
   try { S.draft.image = await resizeImage(blob); render(); toast('画像を貼りました'); } catch (err) { toast(err.message); }
 }
+// ドラッグ＆ドロップ：カード編集画面のどこに落としても入る（Mac のスクショサムネ・Finder の画像）
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+const editing = () => S.view === 'edit' && !!S.draft;
+let dragDepth = 0;
+function dzOn(on) { const z = $('#dropzone'); if (z) z.classList.toggle('over', on); }
+document.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); if (editing()) { dragDepth++; dzOn(true); } });
+document.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); if (editing()) e.dataTransfer.dropEffect = 'copy'; });
+document.addEventListener('dragleave', e => { if (!hasFiles(e) || !editing()) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dzOn(false); });
+document.addEventListener('drop', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); // 画面の外れに落としてもブラウザが画像を開いて画面が消えないように
+  dragDepth = 0; dzOn(false);
+  if (!editing()) { toast('カードの編集画面に落としてください'); return; }
+  const f = [...e.dataTransfer.files].find(x => x.type.startsWith('image/'));
+  if (!f) { toast('画像ファイルではありません'); return; }
+  setImage(f);
+});
 // Ctrl/⌘+V・長押し「ペースト」で画像を貼る（カード編集中のみ）
 document.addEventListener('paste', e => {
   if (S.view !== 'edit' || !S.draft) return;

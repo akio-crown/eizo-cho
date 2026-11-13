@@ -87,6 +87,12 @@ input[type=text], input[type=url], input[type=password], input[type=search], tex
 }
 textarea { min-height: 72px; resize: vertical; }
 label.f { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 700; color: var(--sub); }
+.dropzone { border: 2px dashed var(--line); border-radius: 12px; padding: 16px 10px; text-align: center; margin-top: 8px; transition: background .15s, border-color .15s; }
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone .dz-text { color: var(--sub); font-size: 14px; }
+.dropzone small { font-size: 12px; }
+.dz-sp { display: none; }
+@media (hover: none) { .dz-pc { display: none; } .dz-sp { display: inline; } }
 .hint { font-size: 12px; color: var(--sub); margin-top: 4px; }
 
 .crumbs { font-size: 13px; color: var(--sub); margin-bottom: 8px; }

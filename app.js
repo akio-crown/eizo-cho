@@ -84,13 +84,20 @@ function ensurePath(names) {
 function newCard(catId) {
   return {
     id: uid(), kind: 'card', categoryId: catId || null,
-    front: '', meaning: '', concept: '', image: '', example: '', mission: '',
+    front: '', meaning: '', concept: '', images: [], example: '', mission: '',
     hint: '',   // 同じ表で意味が複数あるとき、どの意味かを見分けるヒント（例：名詞・お金の場面）
     group: null, // 同じ表の別の意味どうしを結ぶ ID
     problems: [], // [{q, a, exp}]
     srs: { stage: 0, due: now(), lapses: 0, reviews: 0, last: 0 },
     useOk: 0, missionDone: 0, missionLast: 0, needsAI: false, created: now(),
   };
+}
+// 画像は複数枚（images）。旧データの単体 image も読めるようにしてある
+const MAX_IMAGES = 8;
+const imgs = c => Array.isArray(c.images) ? c.images : (c.image ? [c.image] : []);
+function imgGrid(c) {
+  const l = imgs(c); if (!l.length) return '';
+  return `<div class="imggrid ${l.length > 1 ? 'many' : ''}">${l.map(u => `<img src="${u}" alt="">`).join('')}</div>`;
 }
 // 同じ表の別の意味（意味ごとに別カード・別スケジュール）
 function siblings(c) {
@@ -114,7 +121,7 @@ function makeQuestion(c, forTest = false) {
     const p = c.problems[(c.srs.reviews + (forTest ? 1 : 0)) % c.problems.length];
     return { type: 'use', id: c.id, q: p.q, a: p.a, exp: p.exp };
   }
-  if ((c.image || c.concept) && c.srs.reviews % 2 === 1) return { type: 'reverse', id: c.id };
+  if ((imgs(c).length || c.concept) && c.srs.reviews % 2 === 1) return { type: 'reverse', id: c.id };
   return { type: 'recall', id: c.id };
 }
 function nextDueAfter(c, g) {
@@ -314,7 +321,7 @@ function qHtml(c, q, revealed, isTest) {
     if (multi) h += `<div style="text-align:center"><span class="chip lv2">意味 ${sib.findIndex(x => x.id === c.id) + 1}/${sib.length}</span>${c.hint ? ` <b>${esc(c.hint)}</b>` : ''}</div>`;
     if (!revealed) h += `<div class="sub" style="text-align:center;margin-top:12px">${multi ? 'この意味を' : ''}意味・概念・イメージを頭に浮かべてから答えを見る</div>`;
   } else if (q.type === 'reverse') {
-    if (c.image) h += `<img class="q-img" src="${c.image}" alt="">`;
+    h += imgGrid(c);
     if (c.concept) h += `<div class="q-text" style="text-align:center">${esc(c.concept)}</div>`;
   } else {
     h += `<div class="q-text">${esc(q.q)}</div>
@@ -329,7 +336,7 @@ function qHtml(c, q, revealed, isTest) {
       h += `<div class="k">カード</div><div><b>${esc(c.front)}</b>：${esc(c.meaning)}</div>`;
     } else {
       if (q.type === 'reverse') h += `<div class="q-front" style="margin:6px 0">${esc(c.front)}</div>`;
-      if (q.type === 'recall' && c.image) h += `<img class="q-img" src="${c.image}" alt="">`;
+      if (q.type === 'recall') h += imgGrid(c);
       if (q.type === 'recall' && c.concept) h += `<div class="k">概念</div><div>${esc(c.concept)}</div>`;
       if (c.meaning) h += `<div class="k">意味・解説</div><div>${esc(c.meaning)}</div>`;
       if (c.example) h += `<div class="k">模範解答・例文</div><div>${esc(c.example)}</div>`;
@@ -419,10 +426,10 @@ function vCards() {
     h += `<div class="box" style="padding:4px 12px"><ul class="list">` + rows.map(g => {
       const c = g[0], multi = g.length > 1;
       const lvMin = Math.min(...g.map(x => level(x).n)), lvLabel = ['覚える', '使える', '応用'][lvMin - 1];
-      const img = g.find(x => x.image), due = Math.min(...g.map(x => x.srs.due));
+      const img = g.find(x => imgs(x).length), due = Math.min(...g.map(x => x.srs.due));
       const sub = multi ? g.map(x => x.hint || x.meaning || x.concept || '').filter(Boolean).join(' ／ ') : (c.meaning || c.concept || '');
       return `<li data-act="openCard" data-id="${c.id}">
-        ${img ? `<img class="thumb" src="${img.image}" alt="">` : '<span class="folder">🃏</span>'}
+        ${img ? `<img class="thumb" src="${imgs(img)[0]}" alt="">` : '<span class="folder">🃏</span>'}
         <span class="grow"><b>${esc(c.front)}</b>${multi ? ` <span class="chip lv2">意味${g.length}つ</span>` : ''}<br><span class="sub">${esc(sub.slice(0, 40))}</span></span>
         ${g.some(x => x.needsAI) ? '<span class="chip ai">作成待ち</span>' : ''}
         <span class="chip lv${lvMin}">${lvLabel}</span><span class="sub">${fmtDue(due)}</span></li>`;
@@ -436,7 +443,11 @@ function vCards() {
 }
 
 // ---------- カード編集 ----------
-function openEdit(card) { S.draft = JSON.parse(JSON.stringify(card)); go('edit', 'cards'); }
+function openEdit(card) {
+  S.draft = JSON.parse(JSON.stringify(card));
+  S.draft.images = imgs(S.draft).slice(); S.draft.image = ''; // 旧データの単体 image を images に引き継ぐ
+  go('edit', 'cards');
+}
 function catOptions(sel) {
   const out = [`<option value="">（分類なし）</option>`];
   const walk = (pid, depth) => childCats(pid).forEach(c => { out.push(`<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${'　'.repeat(depth)}${esc(c.name)}</option>`); walk(c.id, depth + 1); });
@@ -453,16 +464,17 @@ function vEdit() {
   const d = S.draft, exists = items.has(d.id) && !items.get(d.id).deleted;
   const lv = level(d), sib = siblings(d), multi = sib.length > 1, others = sib.filter(x => x.id !== d.id);
 
+  const im = imgs(d);
   const imageBox = `<div class="box">
-      <h2>裏：映像（写真・図）</h2>
-      ${d.image ? `<img class="q-img prev" src="${d.image}" alt=""><div class="row" style="justify-content:center;margin-bottom:8px"><button class="small danger" data-act="removeImage">写真を外す</button></div>` : ''}
-      <div id="dropzone" class="dropzone ${d.image ? 'compact' : ''}">
-        <div class="dz-text"><span class="dz-pc">${d.image ? '差し替え：新しい画像をここへドロップ' : 'ここに画像をドラッグ＆ドロップ<br><small>Mac のスクショ右下のサムネをつかんで、そのままここへ</small>'}</span><span class="dz-sp">${d.image ? '差し替える' : '写真・スクショを追加'}</span></div>
+      <h2>裏：映像（写真・図） ${im.length ? `<span class="chip lv2">${im.length}枚</span>` : ''}</h2>
+      ${im.length ? `<div class="gallery">${im.map((u, i) => `<div class="gal-item"><img src="${u}" alt=""><button class="gal-x" data-act="removeImage" data-i="${i}" aria-label="この画像を外す">✕</button>${i === 0 ? '<span class="gal-main">1枚目</span>' : ''}</div>`).join('')}</div>` : ''}
+      ${im.length >= MAX_IMAGES ? `<div class="hint">画像は ${MAX_IMAGES} 枚までです。</div>` : `<div id="dropzone" class="dropzone ${im.length ? 'compact' : ''}">
+        <div class="dz-text"><span class="dz-pc">${im.length ? '画像を追加：ここへドロップ（複数OK）' : 'ここに画像をドラッグ＆ドロップ（複数OK）<br><small>Mac のスクショ右下のサムネをつかんで、そのままここへ</small>'}</span><span class="dz-sp">${im.length ? '画像を追加' : '写真・スクショを追加'}</span></div>
         <div class="row" style="justify-content:center;margin-top:8px">
-          <label class="btn ${d.image ? '' : 'primary'}">📷 写真から選ぶ<input type="file" accept="image/*" id="imgInput" hidden></label>
+          <label class="btn ${im.length ? '' : 'primary'}">📷 写真から選ぶ（複数OK）<input type="file" accept="image/*" multiple id="imgInput" hidden></label>
           <button data-act="pasteImage">📋 貼り付け</button>
         </div>
-      </div>
+      </div>`}
       <label class="f">ひとことで言うと（概念・イメージ）</label>
       <textarea data-f="concept" placeholder="例：やるべきことを「あとで」の箱に押し込むイメージ">${esc(d.concept)}</textarea>
       <label class="f">日本語の意味・解説</label>
@@ -489,7 +501,7 @@ function vEdit() {
 
   const senses = sec('senses', '同じ表の別の意味', multi ? sib.length : '', multi,
     `<div class="sub" style="margin-bottom:6px">${multi ? `この言葉には意味が ${sib.length} つ。意味ごとに写真・復習の間隔・問題を別々に持ちます。` : '意味が複数ある言葉（bank＝銀行／土手 など）は、意味ごとに別カードにすると、写真も復習も意味ごとに覚えられます。'}</div>
-      ${others.length ? `<ul class="list">${others.map(x => `<li data-act="openSibling" data-id="${x.id}">${x.image ? `<img class="thumb" src="${x.image}" alt="">` : '<span class="folder">🃏</span>'}<span class="grow">${esc(x.hint || x.meaning || x.concept || '（未入力）')}</span><span class="sub">${fmtDue(x.srs.due)}</span></li>`).join('')}</ul>` : ''}
+      ${others.length ? `<ul class="list">${others.map(x => `<li data-act="openSibling" data-id="${x.id}">${imgs(x).length ? `<img class="thumb" src="${imgs(x)[0]}" alt="">` : '<span class="folder">🃏</span>'}<span class="grow">${esc(x.hint || x.meaning || x.concept || '（未入力）')}</span><span class="sub">${fmtDue(x.srs.due)}</span></li>`).join('')}</ul>` : ''}
       <button class="small" style="margin-top:8px" data-act="addSense">＋ 別の意味を追加</button>`);
 
   const more = exists ? sec('more', 'その他（記録・削除）', '', false,
@@ -589,6 +601,14 @@ function requestText() {
 カード：
 ${JSON.stringify(ai, null, 1)}`;
 }
+// 取り込み JSON の image（1枚）／images（複数）を反映（画像の URL か data URL）
+function applyImages(c, x) {
+  const list = [];
+  if (typeof x.image === 'string' && x.image.trim()) list.push(x.image.trim());
+  if (Array.isArray(x.images)) for (const u of x.images) if (typeof u === 'string' && u.trim()) list.push(u.trim());
+  if (!list.length) return;
+  c.images = [...new Set([...imgs(c), ...list])].slice(0, MAX_IMAGES); c.image = '';
+}
 function importCards(text) {
   let s = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
   const i = s.search(/[\[{]/); if (i > 0) s = s.slice(i);
@@ -606,7 +626,8 @@ function importCards(text) {
       for (const sx of x.senses) {
         const n = newCard(cat);
         n.front = String(x.front).trim(); n.group = gid;
-        for (const k of ['hint', 'meaning', 'concept', 'example', 'mission', 'image']) if (typeof sx[k] === 'string' && sx[k].trim()) n[k] = sx[k].trim();
+        for (const k of ['hint', 'meaning', 'concept', 'example', 'mission']) if (typeof sx[k] === 'string' && sx[k].trim()) n[k] = sx[k].trim();
+        applyImages(n, sx);
         if (Array.isArray(sx.problems)) n.problems = sx.problems.filter(p => p && p.q).map(p => ({ q: String(p.q), a: String(p.a ?? ''), exp: String(p.exp ?? '') }));
         save(n); added++;
       }
@@ -617,7 +638,8 @@ function importCards(text) {
       c = newCard(Array.isArray(x.path) ? ensurePath(x.path) : (typeof x.path === 'string' ? ensurePath(x.path.split(/\s*[>›\/]\s*/)) : S.catId));
       added++;
     } else updated++;
-    for (const k of ['front', 'hint', 'meaning', 'concept', 'example', 'mission', 'image']) if (typeof x[k] === 'string' && x[k].trim()) c[k] = x[k].trim();
+    for (const k of ['front', 'hint', 'meaning', 'concept', 'example', 'mission']) if (typeof x[k] === 'string' && x[k].trim()) c[k] = x[k].trim();
+    applyImages(c, x);
     if (Array.isArray(x.problems) && x.problems.length) {
       c.problems = x.problems.filter(p => p && p.q).map(p => ({ q: String(p.q), a: String(p.a ?? ''), exp: String(p.exp ?? '') }));
     }
@@ -818,14 +840,15 @@ const actions = {
   cancelEdit() { S.draft = null; go('cards', 'cards'); },
   addProblem() { S.draft.problems.push({ q: '', a: '', exp: '' }); render(); },
   delProblem(d) { S.draft.problems.splice(+d.i, 1); render(); },
-  removeImage() { S.draft.image = ''; render(); },
+  removeImage(d) { S.draft.images.splice(+d.i, 1); render(); },
   async pasteImage() {
     try {
-      const list = await navigator.clipboard.read();
+      const list = await navigator.clipboard.read(), blobs = [];
       for (const it of list) {
         const type = it.types.find(t => t.startsWith('image/'));
-        if (type) { await setImage(await it.getType(type)); return; }
+        if (type) blobs.push(await it.getType(type));
       }
+      if (blobs.length) { await addImages(blobs); return; }
       toast('クリップボードに画像がありません。スクショをコピーしてからもう一度');
     } catch (e) { toast('貼れませんでした：' + (e.message || e.name)); }
   },
@@ -896,8 +919,21 @@ document.addEventListener('input', e => {
   if (el.dataset.f && el.type !== 'checkbox' && el.tagName !== 'SELECT') S.draft[el.dataset.f] = el.value;
   if (el.dataset.p !== undefined) S.draft.problems[+el.dataset.p][el.dataset.k] = el.value;
 });
-async function setImage(blob) {
-  try { S.draft.image = await resizeImage(blob); render(); toast('画像を貼りました'); } catch (err) { toast(err.message); }
+// 画像を追加（複数OK・最大 MAX_IMAGES 枚）
+async function addImages(blobs) {
+  const d = S.draft; if (!d) return;
+  d.images = imgs(d).slice();
+  const room = MAX_IMAGES - d.images.length;
+  if (room <= 0) { toast(`画像は ${MAX_IMAGES} 枚までです`); return; }
+  let added = 0, failed = 0;
+  for (const b of [...blobs].slice(0, room)) {
+    try { d.images.push(await resizeImage(b)); added++; } catch { failed++; }
+  }
+  if (S.draft !== d) return; // 追加中に画面を離れた
+  d.image = '';
+  render();
+  const skipped = blobs.length - Math.min(blobs.length, room);
+  toast(`${added}枚追加しました${skipped ? `（${skipped}枚は上限で外しました）` : ''}${failed ? `（${failed}枚は読めませんでした）` : ''}`);
 }
 // ドラッグ＆ドロップ：カード編集画面のどこに落としても入る（Mac のスクショサムネ・Finder の画像）
 const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
@@ -912,16 +948,16 @@ document.addEventListener('drop', e => {
   e.preventDefault(); // 画面の外れに落としてもブラウザが画像を開いて画面が消えないように
   dragDepth = 0; dzOn(false);
   if (!editing()) { toast('カードの編集画面に落としてください'); return; }
-  const f = [...e.dataTransfer.files].find(x => x.type.startsWith('image/'));
-  if (!f) { toast('画像ファイルではありません'); return; }
-  setImage(f);
+  const fs = [...e.dataTransfer.files].filter(x => x.type.startsWith('image/'));
+  if (!fs.length) { toast('画像ファイルではありません'); return; }
+  addImages(fs);
 });
 // Ctrl/⌘+V・長押し「ペースト」で画像を貼る（カード編集中のみ）
 document.addEventListener('paste', e => {
   if (S.view !== 'edit' || !S.draft) return;
-  const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith('image/'));
-  if (!f) return; // 文字の貼り付けはそのまま
-  e.preventDefault(); setImage(f);
+  const fs = [...(e.clipboardData?.files || [])].filter(x => x.type.startsWith('image/'));
+  if (!fs.length) return; // 文字の貼り付けはそのまま
+  e.preventDefault(); addImages(fs);
 });
 // 入力欄を、書いた量に合わせて広げる（閉じている折りたたみの中は 0 なので触らない）
 function autosize(root = document) {
@@ -954,8 +990,9 @@ document.addEventListener('change', async e => {
   const el = e.target;
   if (S.draft && el.dataset.f === 'needsAI') S.draft.needsAI = el.checked;
   if (S.draft && el.dataset.f === 'categoryId') S.draft.categoryId = el.value || null;
-  if (el.id === 'imgInput' && el.files[0]) {
-    try { S.draft.image = await resizeImage(el.files[0]); render(); } catch (err) { toast(err.message); }
+  if (el.id === 'imgInput' && el.files.length) {
+    const fs = [...el.files]; el.value = ''; // 同じ写真をもう一度選べるように
+    addImages(fs);
   }
   if (el.id === 'restoreInput' && el.files[0]) {
     try { const n = restoreAll(await el.files[0].text()); toast(`${n} 件を読み込みました`); render(); } catch (err) { toast('読み込めません：' + err.message); }

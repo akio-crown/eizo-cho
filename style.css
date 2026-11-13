@@ -92,6 +92,17 @@ label.f { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 700;
 .dropzone .dz-text { color: var(--sub); font-size: 14px; }
 .dropzone small { font-size: 12px; }
 .q-img.prev { max-height: 190px; }
+/* 画像が複数：編集画面のギャラリー */
+.gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.gal-item { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--bg); }
+.gal-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gal-x { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 13px; line-height: 1; }
+.gal-main { position: absolute; left: 4px; bottom: 4px; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: rgba(0,0,0,.65); color: #fff; }
+/* 復習の画面：画像が複数なら2列で全部見せる */
+.imggrid { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 10px 0; justify-items: center; }
+.imggrid img { max-width: 100%; max-height: 260px; border-radius: 10px; object-fit: contain; }
+.imggrid.many { grid-template-columns: repeat(2, 1fr); }
+.imggrid.many img { max-height: 170px; width: 100%; background: var(--bg); }
 .dropzone.compact { padding: 8px 10px; }
 .dz-sp { display: none; }
 details.box > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 15px; min-height: 28px; }

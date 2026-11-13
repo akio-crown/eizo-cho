@@ -10,7 +10,7 @@ const MIN = 60000, DAY = 86400000;
 // エビングハウスの忘却曲線に沿った復習間隔（段階0〜8）
 const INTERVALS = [10 * MIN, 1 * DAY, 2 * DAY, 4 * DAY, 7 * DAY, 15 * DAY, 30 * DAY, 60 * DAY, 120 * DAY];
 const SESSION_MAX = 50;
-const APP_VERSION = 'v10'; // sw.js の VERSION（eizo-cho-vN）と必ず同じにする。更新のたびに両方上げる
+const APP_VERSION = 'v11'; // sw.js の VERSION（eizo-cho-vN）と必ず同じにする。更新のたびに両方上げる
 const TEST_SIZE = 15;
 const ymd = (t = now()) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -1054,5 +1054,11 @@ window.addEventListener('online', () => sync.run());
   setInterval(() => { if (!document.hidden) sync.run(); }, 60000);
   checkUpdate();
   setInterval(() => { if (!document.hidden) checkUpdate(); }, 5 * MIN);
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    // 新しい版が入ったと知らされたら、返事をしてから自分で判断（入力・復習中はバナー、それ以外は読み込み直し）
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data && e.data.type === 'sw-updated') { if (e.ports[0]) e.ports[0].postMessage('ok'); checkUpdate(); }
+    });
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();

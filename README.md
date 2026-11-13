@@ -70,3 +70,6 @@ cd ~/Desktop/アプリ開発/eizo-cho && python3 -m http.server 8765
 - 「意味の見分けヒント」（例：名詞・お金の場面）が復習の問題文に出る。答えは書かない
 - 同じ言葉の別の意味は、復習で続けて出ない
 - Claude への取り込みは `senses` で：`{"front":"bank","senses":[{"hint":"…","meaning":"銀行"},{"hint":"…","meaning":"土手"}]}`
+
+## 復習のキーボード操作（PC）
+Space / Enter＝答えを見る、1〜4＝もう一度 / 難しい / 正解 / 簡単。使える問題の入力中は ⌘/Ctrl+Enter で答えを見る。

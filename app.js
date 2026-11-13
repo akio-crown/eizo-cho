@@ -15,7 +15,7 @@ const ymd = (t = now()) => { const d = new Date(t); return `${d.getFullYear()}-$
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 function fmtSpan(ms) {
   if (ms < 60 * MIN) return `${Math.max(1, Math.round(ms / MIN))}分`;
-  if (ms < DAY) return `${Math.round(ms / (60 * MIN))}時間`;
+  if (ms < DAY - 30 * MIN) return `${Math.round(ms / (60 * MIN))}時間`;
   return `${Math.round(ms / DAY)}日`;
 }
 function fmtDue(t) {
@@ -185,55 +185,77 @@ function render() {
   const m = $('#main');
   const fn = { home: vHome, review: vReview, test: vTest, cards: vCards, edit: vEdit, settings: vSettings }[S.view];
   m.innerHTML = fn();
+  m.classList.toggle('flexcol', S.view === 'review' || S.view === 'test'); // 復習中はボタンを画面の下に寄せる
   if (S.view === 'edit') autosize();
   $('#syncBadge').textContent = sync.badge();
 }
 function go(view, tab) { S.view = view; if (tab) S.tab = tab; render(); window.scrollTo(0, 0); }
 
 // ---------- ホーム ----------
+function dayStat(t = now()) { return items.get('day-' + ymd(t)) || { count: 0, ok: 0 }; }
+function nextDueIn() {
+  const f = cards().filter(c => c.srs.due > now()).map(c => c.srs.due);
+  return f.length ? Math.min(...f) - now() : null;
+}
+function weekStrip() {
+  const names = '日月火水木金土';
+  let h = '<div class="week">';
+  for (let i = 6; i >= 0; i--) {
+    const t = now() - i * DAY, n = dayStat(t).count;
+    h += `<div class="wd ${n ? 'on' : ''} ${i === 0 ? 'today' : ''}"><span class="dot">${n || ''}</span><span class="sub">${names[new Date(t).getDay()]}</span></div>`;
+  }
+  return h + '</div>';
+}
 function vHome() {
   const all = cards(), due = all.filter(isDue);
+  if (!all.length) {
+    return `<div class="box empty">まだカードがありません。<br>まず1枚作るか、サンプルで流れを試せます。<br><br>
+      <button class="primary" data-act="tab" data-tab="cards">カードを作る</button>
+      <button data-act="loadSample">サンプルを入れる</button></div>`;
+  }
   const lv = [0, 0, 0]; all.forEach(c => lv[level(c).n - 1]++);
-  const ai = all.filter(c => c.needsAI).length;
-  const ms = todaysMissions();
-  const lt = lastTest();
-  let h = `
-  <div class="box">
-    <div class="row between">
-      <div><div class="sub">今日の復習</div><div class="big">${due.length}<span class="sub"> 件</span></div></div>
-      <button class="primary" data-act="startReview" ${due.length ? '' : 'disabled'}>復習を始める</button>
-    </div>
-    <div class="sub" style="margin-top:6px">連続 ${streak()} 日 ・ 全 ${all.length} 枚</div>
-  </div>
-  <div class="box">
-    <h2>学習の段階</h2>
-    <div class="stats">
-      <div><b style="color:var(--lv1)">${lv[0]}</b><span class="sub">覚える</span></div>
-      <div><b style="color:var(--lv2)">${lv[1]}</b><span class="sub">使える</span></div>
-      <div><b style="color:var(--lv3)">${lv[2]}</b><span class="sub">応用</span></div>
-    </div>
-    <div class="hint">使える＝使える問題に2回以上正解。応用＝さらに実生活ミッションを1回以上達成。</div>
+  const ai = all.filter(c => c.needsAI).length, ms = todaysMissions(), lt = lastTest();
+  const td = dayStat(), st = streak(), nd = nextDueIn();
+  const mins = Math.max(1, Math.round(due.length * 0.4));
+
+  let h = `<div class="box hero">
+    ${due.length
+      ? `<div class="sub">今日の復習</div>
+         <div class="big">${due.length}<span class="sub"> 件</span></div>
+         <div class="sub">目安 約${mins}分${due.length > SESSION_MAX ? `（1回 ${SESSION_MAX} 件まで）` : ''}</div>
+         <button class="primary wide hero-btn" data-act="startReview">復習を始める</button>`
+      : `<div class="big" style="font-size:24px">今日の復習は完了 🎉</div>
+         <div class="sub" style="margin-top:4px">${nd ? `次の復習は ${fmtSpan(nd)}後` : 'カードを足すと復習が増えます'}</div>`}
+    <div class="sub" style="margin-top:12px">今日 ${td.count} 回答${td.count ? `（正答 ${Math.round(td.ok / td.count * 100)}%）` : ''} ・ 連続 ${st} 日</div>
   </div>`;
+
   if (testDue()) {
     h += `<div class="box banner"><h2>今週の小テストの日です</h2>
-      <div class="sub">最近覚えたものと、間違えたものから最大${TEST_SIZE}問。使える問題を優先します。</div>
+      <div class="sub">最近覚えたものと間違えたものから最大${TEST_SIZE}問。使える問題を優先します。</div>
       <button class="primary wide" style="margin-top:10px" data-act="startTest">小テストを始める</button></div>`;
-  } else if (lt) {
-    h += `<div class="box"><h2>小テスト</h2><div class="sub">前回 ${new Date(lt.date).toLocaleDateString('ja-JP')}：${lt.score}/${lt.total} 点 ・ 次回は${fmtSpan(Math.max(0, lt.date + 7 * DAY - now()))}後</div>
-      <button class="small" style="margin-top:8px" data-act="startTest">今すぐ受ける</button></div>`;
   }
+
   if (ms.length) {
     h += `<div class="box"><h2>今日の実生活ミッション</h2>` + ms.map(c => {
-      const doneToday = c.missionLast && ymd(c.missionLast) === ymd();
-      return `<div class="mission"><b>${esc(c.front)}</b><div>${esc(c.mission)}</div>
-        <div class="row" style="margin-top:6px">${doneToday ? '<span class="sub">今日やった ✓</span>' : `<button class="small" data-act="missionDone" data-id="${c.id}">やった</button>`}
-        <span class="sub">達成 ${c.missionDone} 回</span></div></div>`;
+      const done = c.missionLast && ymd(c.missionLast) === ymd();
+      return `<div class="mission ${done ? 'done' : ''}">
+        <button class="check ${done ? 'on' : ''}" ${done ? 'disabled' : `data-act="missionDone" data-id="${c.id}"`} aria-label="やった">${done ? '✓' : ''}</button>
+        <div class="grow"><b>${esc(c.front)}</b><div class="sub" style="font-size:14px;color:var(--text)">${esc(c.mission)}</div>
+        <div class="sub">達成 ${c.missionDone} 回</div></div></div>`;
     }).join('') + `</div>`;
   }
+
+  h += `<div class="box"><h2>この7日間</h2>${weekStrip()}
+    <h2 style="margin-top:14px">学習の段階 <span class="sub" style="font-weight:400">全 ${all.length} 枚</span></h2>
+    <div class="stagebar">${[0, 1, 2].map(i => lv[i] ? `<div class="seg s${i + 1}" style="flex:${lv[i]}"></div>` : '').join('')}</div>
+    <div class="legend"><span><i class="s1"></i>覚える ${lv[0]}</span><span><i class="s2"></i>使える ${lv[1]}</span><span><i class="s3"></i>応用 ${lv[2]}</span></div>
+    <div class="hint">使える＝使える問題に2回以上正解。応用＝さらに実生活ミッションを1回以上達成。</div></div>`;
+
+  if (lt && !testDue()) {
+    h += `<div class="box"><div class="row between"><div><b>小テスト</b><div class="sub">前回 ${new Date(lt.date).toLocaleDateString('ja-JP')}：${lt.score}/${lt.total} 点 ・ 次回は${fmtSpan(Math.max(0, lt.date + 7 * DAY - now()))}後</div></div>
+      <button class="small" data-act="startTest">今すぐ</button></div></div>`;
+  }
   if (ai) h += `<div class="box"><div class="row between"><span>Claude に問題作成を頼むカード：<b>${ai}</b> 枚</span><button class="small" data-act="tab" data-tab="settings">依頼する</button></div></div>`;
-  if (!all.length) h += `<div class="box empty">まだカードがありません。<br><br>
-    <button class="primary" data-act="tab" data-tab="cards">カードを作る</button>
-    <button data-act="loadSample">サンプルを入れる</button></div>`;
   return h;
 }
 
@@ -250,25 +272,38 @@ function startReview(catId) {
     if (i < 0) i = 0;
     spread.push(rest.splice(i, 1)[0]);
   }
-  S.session = { queue: spread.map(c => c.id), idx: 0, revealed: false, scopeName: name, done: 0 };
+  S.session = { queue: spread.map(c => c.id), idx: 0, revealed: false, scopeName: name, done: 0, ok: 0 };
   S.session.q = makeQuestion(items.get(S.session.queue[0]));
   go('review', 'review');
 }
 function vReview() {
   const s = S.session;
   if (!s || s.idx >= s.queue.length) {
-    const due = cards().filter(isDue).length;
-    return `<div class="box empty">${s ? `おつかれさま！ ${s.done} 回答えました。<br><br>` : ''}
-      今の復習：${due} 件<br><br>
-      <button class="primary" data-act="startReview" ${due ? '' : 'disabled'}>すべての復習を始める</button>
+    const due = cards().filter(isDue).length, nd = nextDueIn();
+    if (s && s.done) {
+      const rate = Math.round((s.ok || 0) / s.done * 100);
+      return `<div class="box hero">
+        <div class="big" style="font-size:26px">おつかれさま 🎉</div>
+        <div class="stats" style="margin-top:14px">
+          <div><b>${s.done}</b><span class="sub">回答</span></div>
+          <div><b>${rate}%</b><span class="sub">正答</span></div>
+          <div><b>${s.done - (s.ok || 0)}</b><span class="sub">もう一度</span></div></div>
+        <div class="sub" style="margin-top:12px">${due ? `まだ復習が ${due} 件あります` : (nd ? `次の復習は ${fmtSpan(nd)}後` : '')}</div>
+        <div class="row" style="margin-top:12px">
+          ${due ? `<button class="primary grow" data-act="startReview">続けて復習（${due}件）</button>` : ''}
+          <button class="${due ? '' : 'primary '}grow" data-act="tab" data-tab="home">ホームへ</button></div></div>`;
+    }
+    return `<div class="box empty">${due ? `復習が ${due} 件あります。` : '今は復習するカードがありません。'}<br><br>
+      <button class="primary" data-act="startReview" ${due ? '' : 'disabled'}>復習を始める</button>
       <div class="hint" style="margin-top:12px">分類ごとの復習は「カード」から。</div></div>`;
   }
   const c = items.get(s.queue[s.idx]);
-  const pct = Math.round(s.idx / s.queue.length * 100);
-  return `<div class="progress"><div style="width:${pct}%"></div></div>
-    <div class="sub">${esc(s.scopeName)} ・ ${s.idx + 1}/${s.queue.length}</div>
-    <div class="box">${qHtml(c, s.q, s.revealed, false)}
-    ${s.revealed ? gradeButtons(c) : `<button class="primary wide" style="margin-top:14px" data-act="reveal">答えを見る</button>`}</div>`;
+  return `<div class="rtop"><button class="small" data-act="exitReview">✕ やめる</button>
+      <span class="sub grow" style="text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.scopeName)}</span>
+      <span class="sub">${s.idx + 1} / ${s.queue.length}</span></div>
+    <div class="progress"><div style="width:${Math.round(s.idx / s.queue.length * 100)}%"></div></div>
+    <div class="box qcard ${s.revealed ? '' : 'unrev'}">${qHtml(c, s.q, s.revealed, false)}</div>
+    <div class="actbar">${s.revealed ? gradeButtons(c) : `<button class="primary grow" data-act="reveal" title="Space">答えを見る</button>`}</div>`;
 }
 function qHtml(c, q, revealed, isTest) {
   const path = catPath(c.categoryId).map(x => x.name).join(' › ');
@@ -277,7 +312,7 @@ function qHtml(c, q, revealed, isTest) {
     const sib = siblings(c), multi = sib.length > 1;
     h += `<div class="q-front" style="margin-bottom:${multi ? 6 : 18}px">${esc(c.front)}</div>`;
     if (multi) h += `<div style="text-align:center"><span class="chip lv2">意味 ${sib.findIndex(x => x.id === c.id) + 1}/${sib.length}</span>${c.hint ? ` <b>${esc(c.hint)}</b>` : ''}</div>`;
-    h += `<div class="sub" style="text-align:center;margin-top:12px">${multi ? 'この意味を' : ''}意味・概念・イメージを頭に浮かべてから答えを見る</div>`;
+    if (!revealed) h += `<div class="sub" style="text-align:center;margin-top:12px">${multi ? 'この意味を' : ''}意味・概念・イメージを頭に浮かべてから答えを見る</div>`;
   } else if (q.type === 'reverse') {
     if (c.image) h += `<img class="q-img" src="${c.image}" alt="">`;
     if (c.concept) h += `<div class="q-text" style="text-align:center">${esc(c.concept)}</div>`;
@@ -322,18 +357,20 @@ function vTest() {
   if (t.idx >= t.qs.length) {
     const score = t.results.filter(r => r.ok).length;
     const miss = t.results.filter(r => !r.ok).map(r => items.get(r.id)).filter(Boolean);
-    return `<div class="box"><h2>小テスト結果</h2><div class="big">${score}<span class="sub"> / ${t.qs.length}</span></div>
-      ${miss.length ? `<div class="k sub" style="margin-top:10px">間違えたカード（今日の復習に戻しました）</div><ul class="list">${miss.map(c => `<li data-act="openCard" data-id="${c.id}">${esc(c.front)}</li>`).join('')}</ul>` : '<p>全問正解！</p>'}
+    return `<div class="box hero"><div class="sub">週1小テスト 結果</div>
+      <div class="big">${score}<span class="sub"> / ${t.qs.length}</span></div>
+      ${miss.length ? `<div class="sub" style="margin-top:10px">間違えたカード（今日の復習に戻しました）</div><ul class="list" style="text-align:left">${miss.map(c => `<li data-act="openCard" data-id="${c.id}"><span class="grow">${esc(c.front)}${c.hint ? ` <span class="sub">${esc(c.hint)}</span>` : ''}</span></li>`).join('')}</ul>` : '<p>全問正解！</p>'}
       <button class="primary wide" style="margin-top:10px" data-act="tab" data-tab="home">ホームへ</button></div>`;
   }
   const q = t.qs[t.idx], c = items.get(q.id);
   if (!c) { t.idx++; return vTest(); }
-  return `<div class="progress"><div style="width:${Math.round(t.idx / t.qs.length * 100)}%"></div></div>
-    <div class="sub">週1小テスト ・ ${t.idx + 1}/${t.qs.length}</div>
-    <div class="box">${qHtml(c, q, t.revealed, true)}
-    ${t.revealed
+  return `<div class="rtop"><button class="small" data-act="tab" data-tab="home">✕ やめる</button>
+      <span class="sub grow" style="text-align:center">週1小テスト</span><span class="sub">${t.idx + 1} / ${t.qs.length}</span></div>
+    <div class="progress"><div style="width:${Math.round(t.idx / t.qs.length * 100)}%"></div></div>
+    <div class="box qcard">${qHtml(c, q, t.revealed, true)}</div>
+    <div class="actbar">${t.revealed
       ? `<div class="grades" style="grid-template-columns:1fr 1fr"><button class="g-again" data-act="testMark" data-ok="0">✕ 間違い</button><button class="g-good" data-act="testMark" data-ok="1">○ 正解</button></div>`
-      : `<button class="primary wide" style="margin-top:14px" data-act="reveal">答え合わせ</button>`}</div>`;
+      : `<button class="primary grow" data-act="reveal">答え合わせ</button>`}</div>`;
 }
 function finishTest() {
   const t = S.test;
@@ -720,10 +757,12 @@ const actions = {
     const a = $('#myAnswer'); S._myAnswer = a ? a.value.trim() : '';
     if (S.view === 'test') S.test.revealed = true; else S.session.revealed = true;
     render();
+    const ans = $('.answer'); if (ans) ans.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   },
+  exitReview() { go('home', 'home'); },
   grade(d) {
     const s = S.session, c = items.get(s.queue[s.idx]);
-    grade(c, d.g, s.q); s.done++;
+    grade(c, d.g, s.q); s.done++; if (d.g !== 'again') s.ok = (s.ok || 0) + 1;
     if (d.g === 'again') s.queue.push(c.id); // セッションの最後にもう一度
     s.idx++; s.revealed = false; S._myAnswer = '';
     if (s.idx < s.queue.length) s.q = makeQuestion(items.get(s.queue[s.idx]));
@@ -898,6 +937,16 @@ document.addEventListener('toggle', e => {
   S.sec[el.dataset.sec] = el.open;
   if (el.open) autosize(el);
 }, true);
+// キーボード（PC）：Space/Enter＝答えを見る、1〜4＝もう一度/難しい/正解/簡単、書いている最中は ⌘/Ctrl+Enter
+document.addEventListener('keydown', e => {
+  if (e.isComposing) return;
+  const rev = S.view === 'review' && S.session && S.session.idx < S.session.queue.length;
+  if (!rev && !(S.view === 'test' && S.test && S.test.idx < S.test.qs.length)) return;
+  const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  const revealed = rev ? S.session.revealed : S.test.revealed;
+  if (!revealed && ((!inField && (e.key === ' ' || e.key === 'Enter')) || ((e.metaKey || e.ctrlKey) && e.key === 'Enter'))) { e.preventDefault(); actions.reveal(); return; }
+  if (revealed && rev && !inField) { const g = { 1: 'again', 2: 'hard', 3: 'good', 4: 'easy' }[e.key]; if (g) actions.grade({ g }); }
+});
 document.addEventListener('compositionend', e => {
   if (e.target.id === 'search') e.target.dispatchEvent(new Event('input', { bubbles: true }));
 });

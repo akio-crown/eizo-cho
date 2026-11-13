@@ -10,6 +10,7 @@ const MIN = 60000, DAY = 86400000;
 // エビングハウスの忘却曲線に沿った復習間隔（段階0〜8）
 const INTERVALS = [10 * MIN, 1 * DAY, 2 * DAY, 4 * DAY, 7 * DAY, 15 * DAY, 30 * DAY, 60 * DAY, 120 * DAY];
 const SESSION_MAX = 50;
+const APP_VERSION = 'v10'; // sw.js の VERSION（eizo-cho-vN）と必ず同じにする。更新のたびに両方上げる
 const TEST_SIZE = 15;
 const ymd = (t = now()) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -175,6 +176,33 @@ function todaysMissions() {
   return list.sort((a, b) => h(seed + a.id) - h(seed + b.id)).slice(0, 3);
 }
 
+// ---------- アプリ自身の更新 ----------
+// 公開されている sw.js の版と、いま動いている版を比べる。違えば新しい版が出ている。
+async function latestVersion() {
+  try {
+    const t = await (await fetch('sw.js?' + Date.now(), { cache: 'no-store' })).text();
+    const m = t.match(/VERSION = 'eizo-cho-(v\d+)'/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+const busyNow = () => !!S.draft || (S.view === 'review' && S.session && S.session.idx < S.session.queue.length) || (S.view === 'test' && S.test && S.test.idx < S.test.qs.length);
+async function forceUpdate() {
+  try { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch {}
+  try { for (const k of await caches.keys()) await caches.delete(k); } catch {}
+  location.replace(location.pathname + '?v=' + Date.now()); // 保存したカードは消えない（端末の IndexedDB は触らない）
+}
+async function checkUpdate() {
+  const v = await latestVersion();
+  if (!v) return;
+  S.latest = v;
+  if (v === APP_VERSION) { S.newer = null; if (S.view === 'settings') render(); return; }
+  S.newer = v;
+  // 入力・復習の最中は勝手に切り替えず、バナーで知らせる。続けて何度も切り替わらないよう 2分に1回まで
+  const last = +localStorage.getItem('vk_upd') || 0;
+  if (!busyNow() && now() - last > 2 * MIN) { localStorage.setItem('vk_upd', String(now())); forceUpdate(); return; }
+  render();
+}
+
 // ---------- 画面の状態 ----------
 const S = {
   tab: 'home',
@@ -191,7 +219,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
   const m = $('#main');
   const fn = { home: vHome, review: vReview, test: vTest, cards: vCards, edit: vEdit, settings: vSettings }[S.view];
-  m.innerHTML = fn();
+  m.innerHTML = (S.newer ? `<div class="box banner row between"><span>新しい版（${S.newer}）があります</span><button class="small primary" data-act="updateNow">更新する</button></div>` : '') + fn();
   m.classList.toggle('flexcol', S.view === 'review' || S.view === 'test'); // 復習中はボタンを画面の下に寄せる
   if (S.view === 'edit') autosize();
   $('#syncBadge').textContent = sync.badge();
@@ -571,6 +599,12 @@ function vSettings() {
       <div class="row"><button data-act="exportAll">全部を書き出す</button><label class="btn">読み込む<input type="file" id="restoreInput" accept="application/json,.json" hidden></label><button data-act="loadSample">サンプルを入れる</button></div>
     </div>
     <div class="box">
+      <h2>アプリの版</h2>
+      <div class="sub">いまの版：<b>${APP_VERSION}</b> ・ ${S.newer ? `新しい版 <b>${S.newer}</b> があります` : (S.latest ? '最新です' : '最新かどうか確認中…')}</div>
+      <div class="row" style="margin-top:8px"><button class="${S.newer ? 'primary' : ''}" data-act="updateNow">最新版に更新</button><button class="small" data-act="checkUpdate">確認する</button></div>
+      <div class="hint">更新してもカードは消えません。更新が効かないときの切り札です（古い保存データを捨てて読み込み直します）。</div>
+    </div>
+    <div class="box">
       <h2>復習の間隔</h2>
       <div class="sub">正解するたびに：${INTERVALS.map(fmtSpan).join(' → ')}。<br>「もう一度」で2段階戻り10分後に再出題。段階2から「使える問題」に切り替わります。</div>
     </div>`;
@@ -782,6 +816,11 @@ const actions = {
     const ans = $('.answer'); if (ans) ans.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   },
   exitReview() { go('home', 'home'); },
+  updateNow() {
+    if (S.draft && !confirm('編集中の内容は保存されません。更新しますか？')) return;
+    forceUpdate();
+  },
+  async checkUpdate() { toast('確認しています…'); S.latest = null; await checkUpdate(); toast(S.newer ? `新しい版 ${S.newer} があります` : '最新です'); if (S.view === 'settings') render(); },
   grade(d) {
     const s = S.session, c = items.get(s.queue[s.idx]);
     grade(c, d.g, s.q); s.done++; if (d.g !== 'again') s.ok = (s.ok || 0) + 1;
@@ -998,7 +1037,7 @@ document.addEventListener('change', async e => {
     try { const n = restoreAll(await el.files[0].text()); toast(`${n} 件を読み込みました`); render(); } catch (err) { toast('読み込めません：' + err.message); }
   }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { sync.run(); if (['home', 'cards'].includes(S.view)) render(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkUpdate(); sync.run(); if (['home', 'cards'].includes(S.view)) render(); } });
 window.addEventListener('online', () => sync.run());
 
 // ---------- 起動 ----------
@@ -1013,5 +1052,7 @@ window.addEventListener('online', () => sync.run());
   render();
   sync.run();
   setInterval(() => { if (!document.hidden) sync.run(); }, 60000);
+  checkUpdate();
+  setInterval(() => { if (!document.hidden) checkUpdate(); }, 5 * MIN);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

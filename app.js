@@ -383,8 +383,9 @@ function vEdit() {
       <label class="f">表（覚えたいこと）</label><input type="text" data-f="front" value="${esc(d.front)}" placeholder="例：procrastinate / 二次方程式の解の公式 / ダーツのグリップ">
       <label class="f">裏：写真・図</label>
       ${d.image ? `<img class="q-img" src="${d.image}" alt=""><button class="small danger" data-act="removeImage">写真を外す</button>` : ''}
-      <input type="file" accept="image/*" id="imgInput">
-      <div class="hint">写真・スクショ・手書きの図。映像で覚えるための主役です。</div>
+      <div class="row"><button class="small" data-act="pasteImage">📋 コピーした画像を貼る</button></div>
+      <input type="file" accept="image/*" id="imgInput" style="margin-top:8px">
+      <div class="hint">写真・スクショ・手書きの図。映像で覚えるための主役です。スクショは「コピー」してから上のボタン（PC は Ctrl/⌘+V でも貼れます）。</div>
       <label class="f">裏：概念（ひとことで・イメージ）</label><textarea data-f="concept" placeholder="例：やるべきことを「あとで」の箱に押し込むイメージ">${esc(d.concept)}</textarea>
       <label class="f">裏：日本語の意味・解説</label><textarea data-f="meaning" placeholder="例：（やるべきことを）先延ばしにする">${esc(d.meaning)}</textarea>
       <label class="f">模範解答・例文</label><textarea data-f="example" placeholder="例：Stop procrastinating and start your report.">${esc(d.example)}</textarea>
@@ -686,6 +687,16 @@ const actions = {
   addProblem() { S.draft.problems.push({ q: '', a: '', exp: '' }); render(); },
   delProblem(d) { S.draft.problems.splice(+d.i, 1); render(); },
   removeImage() { S.draft.image = ''; render(); },
+  async pasteImage() {
+    try {
+      const list = await navigator.clipboard.read();
+      for (const it of list) {
+        const type = it.types.find(t => t.startsWith('image/'));
+        if (type) { await setImage(await it.getType(type)); return; }
+      }
+      toast('クリップボードに画像がありません。スクショをコピーしてからもう一度');
+    } catch (e) { toast('貼れませんでした：' + (e.message || e.name)); }
+  },
   saveCard() {
     const d = S.draft;
     if (!d.front.trim()) { toast('表を入れてください'); return; }
@@ -739,6 +750,16 @@ document.addEventListener('input', e => {
   if (!S.draft) return;
   if (el.dataset.f && el.type !== 'checkbox' && el.tagName !== 'SELECT') S.draft[el.dataset.f] = el.value;
   if (el.dataset.p !== undefined) S.draft.problems[+el.dataset.p][el.dataset.k] = el.value;
+});
+async function setImage(blob) {
+  try { S.draft.image = await resizeImage(blob); render(); toast('画像を貼りました'); } catch (err) { toast(err.message); }
+}
+// Ctrl/⌘+V・長押し「ペースト」で画像を貼る（カード編集中のみ）
+document.addEventListener('paste', e => {
+  if (S.view !== 'edit' || !S.draft) return;
+  const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith('image/'));
+  if (!f) return; // 文字の貼り付けはそのまま
+  e.preventDefault(); setImage(f);
 });
 document.addEventListener('compositionend', e => {
   if (e.target.id === 'search') e.target.dispatchEvent(new Event('input', { bubbles: true }));

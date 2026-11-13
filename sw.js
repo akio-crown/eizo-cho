@@ -1,6 +1,6 @@
 // オフラインでも開けるように画面ファイルを保存しておく。
 // アプリを更新したら VERSION を上げる。
-const VERSION = 'eizo-cho-v6';
+const VERSION = 'eizo-cho-v7';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

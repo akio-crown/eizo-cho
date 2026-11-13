@@ -85,13 +85,23 @@ input[type=text], input[type=url], input[type=password], input[type=search], tex
   width: 100%; font: inherit; font-size: 16px; color: var(--text);
   background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
 }
-textarea { min-height: 72px; resize: vertical; }
+textarea { resize: none; }
 label.f { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 700; color: var(--sub); }
 .dropzone { border: 2px dashed var(--line); border-radius: 12px; padding: 16px 10px; text-align: center; margin-top: 8px; transition: background .15s, border-color .15s; }
 .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
 .dropzone .dz-text { color: var(--sub); font-size: 14px; }
 .dropzone small { font-size: 12px; }
+.q-img.prev { max-height: 190px; }
+.dropzone.compact { padding: 8px 10px; }
 .dz-sp { display: none; }
+details.box > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 15px; min-height: 28px; }
+details.box > summary::-webkit-details-marker { display: none; }
+details.box > summary::after { content: '▾'; color: var(--sub); }
+details.box[open] > summary::after { content: '▴'; }
+details.box[open] > summary { margin-bottom: 8px; }
+.savebar { position: sticky; bottom: calc(50px + env(safe-area-inset-bottom)); display: flex; gap: 8px; padding: 10px 0 8px; background: linear-gradient(to top, var(--bg) 70%, transparent); }
+.prob textarea { margin-top: 6px; }
+textarea { min-height: 48px; overflow: hidden; }
 @media (hover: none) { .dz-pc { display: none; } .dz-sp { display: inline; } }
 .hint { font-size: 12px; color: var(--sub); margin-top: 4px; }
 

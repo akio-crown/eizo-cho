@@ -175,6 +175,7 @@ const S = {
   catId: null,       // カード画面で開いている分類
   query: '',
   draft: null,       // 編集中のカード
+  sec: {},           // 編集画面の折りたたみ開閉（key→true/false）
   session: null,     // {queue:[id], idx, q, revealed, scopeName}
   test: null,        // {qs, idx, revealed, results:[]}
 };
@@ -184,6 +185,7 @@ function render() {
   const m = $('#main');
   const fn = { home: vHome, review: vReview, test: vTest, cards: vCards, edit: vEdit, settings: vSettings }[S.view];
   m.innerHTML = fn();
+  if (S.view === 'edit') autosize();
   $('#syncBadge').textContent = sync.badge();
 }
 function go(view, tab) { S.view = view; if (tab) S.tab = tab; render(); window.scrollTo(0, 0); }
@@ -404,65 +406,71 @@ function catOptions(sel) {
   walk(null, 0);
   return out.join('');
 }
+// 折りたたみ欄：開閉は S.sec に覚えておく（画面を描き直しても保つ）
+function sec(key, title, count, defaultOpen, body) {
+  const open = S.sec[key] ?? defaultOpen;
+  return `<details class="box" data-sec="${key}" ${open ? 'open' : ''}>
+    <summary><span>${title}${count ? ` <span class="chip lv2">${count}</span>` : ''}</span></summary>${body}</details>`;
+}
 function vEdit() {
   const d = S.draft, exists = items.has(d.id) && !items.get(d.id).deleted;
-  const lv = level(d);
-  return `<div class="row between"><button class="small" data-act="cancelEdit">← 戻る</button>
-      ${exists ? `<span class="chip lv${lv.n}">${lv.label}</span>` : ''}</div>
-    <div class="box">
-      <label class="f">分類</label><select data-f="categoryId">${catOptions(d.categoryId)}</select>
-      <label class="f">表（覚えたいこと）</label><input type="text" data-f="front" value="${esc(d.front)}" placeholder="例：procrastinate / 二次方程式の解の公式 / ダーツのグリップ">
-      ${(() => {
-        const sib = siblings(d), multi = sib.length > 1;
-        return `<label class="f">意味の見分けヒント${multi ? '（必須に近い）' : '（意味が複数あるときだけ）'}</label>
-      <input type="text" data-f="hint" value="${esc(d.hint)}" placeholder="例：名詞・お金の場面 ／ 名詞・川の場面 ／ 動詞">
-      <div class="hint">同じ表で意味が複数あるとき、復習の問題文に出ます（答えそのものは書かない）。</div>`;
-      })()}
-      <label class="f">裏：写真・図</label>
-      ${d.image ? `<img class="q-img" src="${d.image}" alt=""><button class="small danger" data-act="removeImage">写真を外す</button>` : ''}
-      <div id="dropzone" class="dropzone">
-        <div class="dz-text"><span class="dz-pc">ここに画像をドラッグ＆ドロップ<br><small>Mac のスクショ右下のサムネをつかんで、そのままここへ</small></span><span class="dz-sp">写真・スクショを追加</span></div>
+  const lv = level(d), sib = siblings(d), multi = sib.length > 1, others = sib.filter(x => x.id !== d.id);
+
+  const imageBox = `<div class="box">
+      <h2>裏：映像（写真・図）</h2>
+      ${d.image ? `<img class="q-img prev" src="${d.image}" alt=""><div class="row" style="justify-content:center;margin-bottom:8px"><button class="small danger" data-act="removeImage">写真を外す</button></div>` : ''}
+      <div id="dropzone" class="dropzone ${d.image ? 'compact' : ''}">
+        <div class="dz-text"><span class="dz-pc">${d.image ? '差し替え：新しい画像をここへドロップ' : 'ここに画像をドラッグ＆ドロップ<br><small>Mac のスクショ右下のサムネをつかんで、そのままここへ</small>'}</span><span class="dz-sp">${d.image ? '差し替える' : '写真・スクショを追加'}</span></div>
         <div class="row" style="justify-content:center;margin-top:8px">
-          <label class="btn primary">📷 写真から選ぶ<input type="file" accept="image/*" id="imgInput" hidden></label>
-          <button data-act="pasteImage">📋 コピーした画像を貼る</button>
+          <label class="btn ${d.image ? '' : 'primary'}">📷 写真から選ぶ<input type="file" accept="image/*" id="imgInput" hidden></label>
+          <button data-act="pasteImage">📋 貼り付け</button>
         </div>
       </div>
-      <div class="hint">写真・スクショ・手書きの図。映像で覚えるための主役です。PC は Ctrl/⌘+V でも貼れます。</div>
-      <label class="f">裏：概念（ひとことで・イメージ）</label><textarea data-f="concept" placeholder="例：やるべきことを「あとで」の箱に押し込むイメージ">${esc(d.concept)}</textarea>
-      <label class="f">裏：日本語の意味・解説</label><textarea data-f="meaning" placeholder="例：（やるべきことを）先延ばしにする">${esc(d.meaning)}</textarea>
-      <label class="f">模範解答・例文</label><textarea data-f="example" placeholder="例：Stop procrastinating and start your report.">${esc(d.example)}</textarea>
-    </div>
-    <div class="box">
-      <h2>使える問題</h2>
-      <div class="hint">覚えたことを「使わないと解けない」問題。例：間違った文を直す／公式を使わないと解けない文章題／実際の場面で何をするか。</div>
+      <label class="f">ひとことで言うと（概念・イメージ）</label>
+      <textarea data-f="concept" placeholder="例：やるべきことを「あとで」の箱に押し込むイメージ">${esc(d.concept)}</textarea>
+      <label class="f">日本語の意味・解説</label>
+      <textarea data-f="meaning" placeholder="例：（やるべきことを）先延ばしにする">${esc(d.meaning)}</textarea>
+      <label class="f">模範解答・例文</label>
+      <textarea data-f="example" placeholder="例：Stop procrastinating and start your report.">${esc(d.example)}</textarea>
+    </div>`;
+
+  const problems = sec('problems', '使える問題', d.problems.length || '', d.problems.length > 0 || !exists,
+    `<div class="hint" style="margin:0 0 6px">覚えたことを「使わないと解けない」問題。誤文訂正／公式を使う文章題／実際の場面での判断など。</div>
       ${d.problems.map((p, i) => `<div class="prob">
-        <label class="f">問題 ${i + 1}</label><textarea data-p="${i}" data-k="q" placeholder="例：誤りを直せ：I procrastinated to do my homework.">${esc(p.q)}</textarea>
-        <label class="f">模範解答</label><textarea data-p="${i}" data-k="a">${esc(p.a)}</textarea>
-        <label class="f">解説（任意）</label><textarea data-p="${i}" data-k="exp">${esc(p.exp)}</textarea>
-        <button class="small danger" style="margin-top:6px" data-act="delProblem" data-i="${i}">この問題を消す</button></div>`).join('')}
-      <button class="small" style="margin-top:10px" data-act="addProblem">＋ 問題を足す</button>
-      <label class="row" style="margin-top:12px"><input type="checkbox" data-f="needsAI" ${d.needsAI ? 'checked' : ''}> Claude に問題・解説の作成を頼む</label>
-    </div>
-    <div class="box">
-      <h2>実生活ミッション（応用）</h2>
-      <textarea data-f="mission" placeholder="例：今日の日記かSlackで1回 procrastinate を使う／次の練習でグリップを3本ずつ確認">${esc(d.mission)}</textarea>
-      <div class="hint">実生活で使う場面。ホームに日替わりで出ます。</div>
-    </div>
-    <div class="box">
-      <h2>同じ表の別の意味</h2>
-      ${(() => {
-        const sib = siblings(d);
-        const others = sib.filter(x => x.id !== d.id);
-        return `<div class="sub" style="margin-bottom:6px">${sib.length > 1 ? `この言葉には意味が ${sib.length} つ登録されています。意味ごとに写真・復習の間隔・問題を別々に持ちます。` : '意味が複数ある言葉（bank＝銀行／土手 など）は、意味ごとに別カードにすると、写真も復習も意味ごとに覚えられます。'}</div>
+        <div class="row between"><b>問題 ${i + 1}</b><button class="small danger" data-act="delProblem" data-i="${i}">消す</button></div>
+        <textarea data-p="${i}" data-k="q" placeholder="問題　例：誤りを直せ：I procrastinated to do my homework.">${esc(p.q)}</textarea>
+        <textarea data-p="${i}" data-k="a" placeholder="模範解答">${esc(p.a)}</textarea>
+        <textarea data-p="${i}" data-k="exp" placeholder="解説（任意）">${esc(p.exp)}</textarea></div>`).join('')}
+      <div class="row" style="margin-top:10px">
+        <button class="small" data-act="addProblem">＋ 問題を足す</button>
+        <label class="row" style="margin-left:auto;font-size:13px"><input type="checkbox" data-f="needsAI" ${d.needsAI ? 'checked' : ''}> Claude に作成を頼む</label>
+      </div>`);
+
+  const mission = sec('mission', '実生活ミッション（応用）', d.mission ? '✓' : '', !!d.mission,
+    `<textarea data-f="mission" placeholder="例：今日の日記かSlackで1回 procrastinate を使う／次の練習でグリップを3本ずつ確認">${esc(d.mission)}</textarea>
+      <div class="hint">実生活で使う場面。ホームに日替わりで出ます。</div>`);
+
+  const senses = sec('senses', '同じ表の別の意味', multi ? sib.length : '', multi,
+    `<div class="sub" style="margin-bottom:6px">${multi ? `この言葉には意味が ${sib.length} つ。意味ごとに写真・復習の間隔・問題を別々に持ちます。` : '意味が複数ある言葉（bank＝銀行／土手 など）は、意味ごとに別カードにすると、写真も復習も意味ごとに覚えられます。'}</div>
       ${others.length ? `<ul class="list">${others.map(x => `<li data-act="openSibling" data-id="${x.id}">${x.image ? `<img class="thumb" src="${x.image}" alt="">` : '<span class="folder">🃏</span>'}<span class="grow">${esc(x.hint || x.meaning || x.concept || '（未入力）')}</span><span class="sub">${fmtDue(x.srs.due)}</span></li>`).join('')}</ul>` : ''}
-      <button class="small" style="margin-top:8px" data-act="addSense">＋ 別の意味を追加</button>`;
-      })()}
+      <button class="small" style="margin-top:8px" data-act="addSense">＋ 別の意味を追加</button>`);
+
+  const more = exists ? sec('more', 'その他（記録・削除）', '', false,
+    `<div class="sub">段階 ${d.srs.stage}/8 ・ 次の復習 ${fmtDue(d.srs.due)} ・ 間違い ${d.srs.lapses} 回<br>使える問題 正解 ${d.useOk} 回 ・ ミッション ${d.missionDone} 回</div>
+      <div class="row" style="margin-top:10px"><button data-act="resetCard">覚え直す</button><button class="danger" data-act="deleteCard">このカードを削除</button></div>`) : '';
+
+  return `<div class="row between" style="margin-bottom:10px"><button class="small" data-act="cancelEdit">← 戻る</button>
+      <span class="sub">${exists ? `<span class="chip lv${lv.n}">${lv.label}</span>` : '新しいカード'}</span></div>
+    <div class="box">
+      <label class="f" style="margin-top:0">表（覚えたいこと）</label>
+      <input type="text" data-f="front" value="${esc(d.front)}" placeholder="例：procrastinate / 二次方程式の解の公式 / ダーツのグリップ">
+      ${multi || d.hint ? `<label class="f">意味の見分けヒント</label>
+      <input type="text" data-f="hint" value="${esc(d.hint)}" placeholder="例：名詞・お金の場面 ／ 動詞・会社が目的語">
+      <div class="hint">復習の問題文に出ます（答えそのものは書かない）。</div>` : ''}
+      <label class="f">分類</label><select data-f="categoryId">${catOptions(d.categoryId)}</select>
     </div>
-    <div class="row">
-      <button class="primary grow" data-act="saveCard">保存</button>
-      ${exists ? `<button class="danger" data-act="deleteCard">削除</button><button data-act="resetCard">覚え直す</button>` : ''}
-    </div>
-    ${exists ? `<div class="hint" style="margin-top:8px">段階 ${d.srs.stage}/8 ・ 次の復習 ${fmtDue(d.srs.due)} ・ 間違い ${d.srs.lapses} 回 ・ 使える問題 正解 ${d.useOk} 回 ・ ミッション ${d.missionDone} 回</div>` : ''}`;
+    ${imageBox}${problems}${mission}${senses}${more}
+    <div class="savebar"><button class="primary grow" data-act="saveCard">保存</button></div>`;
 }
 function commitDraft() {
   const d = S.draft;
@@ -845,6 +853,7 @@ document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'search') { if (e.isComposing) return; S.query = el.value; const pos = el.selectionStart; render(); const s = $('#search'); s.focus(); s.setSelectionRange(pos, pos); return; }
   if (!S.draft) return;
+  if (el.tagName === 'TEXTAREA') { el.style.height = 'auto'; el.style.height = (el.scrollHeight + 2) + 'px'; }
   if (el.dataset.f && el.type !== 'checkbox' && el.tagName !== 'SELECT') S.draft[el.dataset.f] = el.value;
   if (el.dataset.p !== undefined) S.draft.problems[+el.dataset.p][el.dataset.k] = el.value;
 });
@@ -875,6 +884,20 @@ document.addEventListener('paste', e => {
   if (!f) return; // 文字の貼り付けはそのまま
   e.preventDefault(); setImage(f);
 });
+// 入力欄を、書いた量に合わせて広げる（閉じている折りたたみの中は 0 なので触らない）
+function autosize(root = document) {
+  root.querySelectorAll('#main textarea').forEach(t => {
+    t.style.height = 'auto';
+    if (t.scrollHeight > 0) t.style.height = (t.scrollHeight + 2) + 'px';
+  });
+}
+// 折りたたみの開閉を覚える（toggle は伝わらないので capture で受ける）
+document.addEventListener('toggle', e => {
+  const el = e.target;
+  if (!(el instanceof HTMLDetailsElement) || !el.dataset.sec) return;
+  S.sec[el.dataset.sec] = el.open;
+  if (el.open) autosize(el);
+}, true);
 document.addEventListener('compositionend', e => {
   if (e.target.id === 'search') e.target.dispatchEvent(new Event('input', { bubbles: true }));
 });
